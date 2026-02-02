@@ -6,8 +6,8 @@ from email.parser import BytesParser
 from email.message import Message
 from typing import Dict, Any
 from email.header import decode_header
-from src.attachment_filter import extract_text_plain_only, BlockedPartInfo
-from src.errors import MessageParseError
+from attachment_filter import extract_text_plain_only, BlockedPartInfo
+from errors import MessageParseError
 
 
 def parse_email(raw_email: bytes) -> Dict[str, Any]:
