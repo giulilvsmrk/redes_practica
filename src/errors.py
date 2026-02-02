@@ -22,7 +22,6 @@ class Pop3SessionClosedError(Pop3SecureClientError):
     """Uso de sesión cerrada o quit prematuro."""
 
 
-# Mensajes 
 class MessageFetchError(Pop3SecureClientError):
     """Fallo al obtener el contenido del mensaje (TOP/RETR)."""
 
