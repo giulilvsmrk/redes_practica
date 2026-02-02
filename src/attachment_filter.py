@@ -4,9 +4,15 @@ from dataclasses import dataclass
 from email.message import Message
 from typing import Iterable
 
+import os
+import re
+import tempfile
+from pathlib import Path
+from errors import UnsafeContentBlockedError, MessageParseError
+
 
 BLOCKED_MIME_PREFIXES = ("image/",)
-BLOCKED_MIME_EXACT = ("application/pdf", "application/x-pdf")
+BLOCKED_MIME_EXACT = ("application/pdf", "application/x-pdf", "application/octet-stream")
 BLOCKED_EXTENSIONS = (
     ".pdf",
     ".png",
@@ -84,9 +90,7 @@ def classify_parts(msg: Message) -> tuple[list[BlockedPartInfo], list[Message]]:
     return blocked, allowed
 
 
-def extract_text_plain_only(
-    msg: Message, *, max_chars: int = 50_000
-) -> tuple[str, list[BlockedPartInfo]]:
+def extract_text_plain_only(msg: Message, *, max_chars: int = 50_000) -> tuple[str, list[BlockedPartInfo]]:
     blocked, allowed_parts = classify_parts(msg)
 
     chunks: list[str] = []
@@ -95,7 +99,6 @@ def extract_text_plain_only(
     for part in allowed_parts:
         ctype = (part.get_content_type() or "").lower()
 
-        # Solo texto plano
         if ctype != "text/plain":
             continue
 
@@ -104,7 +107,6 @@ def extract_text_plain_only(
             continue
 
         payload_bytes = part.get_payload(decode=True)
-
         if payload_bytes is None:
             payload = part.get_payload()
             if isinstance(payload, str):
@@ -136,3 +138,55 @@ def extract_text_plain_only(
 
     safe_text = "\n".join(chunks)
     return safe_text, blocked
+
+
+_FILENAME_CLEAN_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+
+def _safe_filename(name: str) -> str:
+    base = os.path.basename(name.strip())
+    base = _FILENAME_CLEAN_RE.sub("_", base)
+    return base or "attachment.bin"
+
+
+def get_leaf_part_by_index(msg: Message, index: int) -> Message | None:
+    for i, part in enumerate(iter_leaf_parts(msg), start=1):
+        if i == index:
+            return part
+    return None
+
+def export_blocked_attachment(
+    msg: Message,
+    blocked_index: int,
+    *,
+    export_dir: str | None = None
+) -> str:
+    part = get_leaf_part_by_index(msg, blocked_index)
+    if part is None:
+        raise MessageParseError(f"No existe la parte con index={blocked_index}")
+
+    ctype = (part.get_content_type() or "application/octet-stream").lower()
+    filename = part.get_filename()
+
+    if not (is_blocked_mime(ctype) or is_blocked_filename(filename)):
+        raise UnsafeContentBlockedError(
+            "La parte solicitada no está marcada como bloqueada (no se exporta).",
+            content_type=ctype,
+            filename=filename,
+        )
+
+    payload = part.get_payload(decode=True)
+    if payload is None:
+        raise MessageParseError("No se pudo decodificar el payload del adjunto.")
+
+    if export_dir is None:
+        export_dir = tempfile.gettempdir()
+
+    Path(export_dir).mkdir(parents=True, exist_ok=True)
+
+    out_name = _safe_filename(filename or f"blocked_{blocked_index}.bin")
+    out_path = os.path.join(export_dir, out_name)
+
+    with open(out_path, "wb") as f:
+        f.write(payload)
+
+    return out_path
