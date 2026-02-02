@@ -5,7 +5,7 @@ from email import policy
 from email.parser import BytesParser
 from email.message import Message
 from typing import Dict, Any
-
+from email.header import decode_header
 from src.attachment_filter import extract_text_plain_only, BlockedPartInfo
 from src.errors import MessageParseError
 
@@ -39,12 +39,9 @@ def parse_email(raw_email: bytes) -> Dict[str, Any]:
 
 
 def extract_headers(msg: Message) -> Dict[str, str | None]:
-    """
-    Extrae headers importantes del correo.
-    """
     return {
-        "subject": msg.get("Subject"),
-        "from": msg.get("From"),
+        "subject": _decode_mime_header(msg.get("Subject")),
+        "from": _decode_mime_header(msg.get("From")),
         "date": msg.get("Date"),
     }
 
@@ -59,3 +56,16 @@ def extract_safe_body(msg: Message) -> tuple[str, list[BlockedPartInfo]]:
         return text.strip(), blocked
     except Exception as exc:
         raise MessageParseError(f"Error al extraer el cuerpo del mensaje: {exc}") from exc
+
+
+def _decode_mime_header(value: str | None) -> str | None:
+    if not value:
+        return value
+    parts = decode_header(value)
+    out: list[str] = []
+    for chunk, enc in parts:
+        if isinstance(chunk, bytes):
+            out.append(chunk.decode(enc or "utf-8", errors="replace"))
+        else:
+            out.append(chunk)
+    return "".join(out).strip()
